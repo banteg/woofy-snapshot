@@ -2,28 +2,26 @@ import math
 from collections import Counter
 from fractions import Fraction
 
-from brownie import Contract, chain, interface
+from brownie import Contract, chain, interface, web3
 from joblib import Memory
 from scripts.snapshot import UNISWAP_V3_FACTORY
 
 from camera_shy.multicall import fetch_multicall, fetch_multicall_batched
-
-memory = Memory(f"cache/{chain.id}", verbose=0)
-
-UNISWAP_V3_FACTORY = "0x1F98431c8aD98523631AE4a59f267346ea31F984"
-NFT_POSITION_MANAGER = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
+from camera_shy.common import UNISWAP_V3_FACTORY, NFT_POSITION_MANAGER, memory, get_code
 
 
 @memory.cache()
 def is_uniswap_v3_pool(address):
+    if not get_code(address):
+        return False
     try:
-        factory = interface.IUniswapV3Pool(address).factory()
-        return factory == UNISWAP_V3_FACTORY
+        return interface.IUniswapV3Pool(address).factory() == UNISWAP_V3_FACTORY
     except ValueError:
         return False
 
 
-def fetch_uniswap_v3_positions(block=None):
+@memory.cache()
+def fetch_uniswap_v3_positions(block):
     manager = Contract(NFT_POSITION_MANAGER)
     total_supply = manager.totalSupply(block_identifier=block)
     ids = fetch_multicall_batched(
@@ -51,9 +49,7 @@ def unwrap_liquidity(pool, token, positions, block=None, min_balance=0):
     positions = filter_positions_of_pool(pool, positions)
     total_liquidity = sum(pos["liquidity"] for pos in positions.values())
     total_balance = token.balanceOf(pool, block_identifier=block)
-    owners = fetch_multicall_batched(
-        [[manager, "ownerOf", i] for i in positions], block=block
-    )
+    owners = fetch_multicall([[manager, "ownerOf", i] for i in positions], block=block)
 
     user_balances = Counter()
 
