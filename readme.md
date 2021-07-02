@@ -12,6 +12,7 @@ Snapshots balances across multiple chains, unwraps balances inside AMMs.
 brownie run snapshot --network mainnet
 brownie run snapshot --network ftm-main
 brownie run snapshot --network bsc-main
+brownie run snapshot --network polygon
 ```
 
 2. Combine balances into chances.

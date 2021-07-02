@@ -28,26 +28,27 @@ CHAINS = {
         "network": "eth",
         "woofy": "0xD0660cD418a64a1d44E9214ad8e459324D8157f1",
         "deploy_block": 12414993,
-        "block_time": 13.4,
     },
     250: {
         "network": "ftm",
         "woofy": "0xD0660cD418a64a1d44E9214ad8e459324D8157f1",
         "deploy_block": 6146773,
-        "block_time": 0.873,
     },
     56: {
         "network": "bsc",
         "woofy": "0xD0660cD418a64a1d44E9214ad8e459324D8157f1",
         "deploy_block": 7363975,
-        "block_time": 3.038,
+    },
+    137: {
+        "network": "matic",
+        "woofy": "0xD0660cD418a64a1d44E9214ad8e459324D8157f1",
+        "deploy_block": 14604154,
     },
 }
 UNISWAP_V3_FACTORY = "0x1F98431c8aD98523631AE4a59f267346ea31F984"
 CHAIN = CHAINS[chain.id]
 WOOFY = CHAIN["woofy"]
 DEPLOY_BLOCK = CHAIN["deploy_block"]
-BLOCK_TIME = CHAIN["block_time"]
 
 
 def generate_snapshot_blocks(start, interval):
