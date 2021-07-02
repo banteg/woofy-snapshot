@@ -15,6 +15,7 @@ UNISWAP_V3_FACTORY = "0x1F98431c8aD98523631AE4a59f267346ea31F984"
 NFT_POSITION_MANAGER = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
 
 memory = Memory(f"cache/{chain.id}", verbose=0)
+log_batch_size = {56: 1000}.get(chain.id, 10000)
 
 
 @memory.cache()
@@ -39,7 +40,7 @@ def get_token_transfers(token, start_block):
     yield from concat(
         get_logs(token, [contract.topics["Transfer"]], start, end)
         for start, end in tqdm(
-            list(block_ranges(start_block, chain.height, 10000)), desc="fetch logs"
+            list(block_ranges(start_block, chain.height, log_batch_size)), desc="fetch logs"
         )
     )
 
