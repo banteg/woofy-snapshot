@@ -3,6 +3,7 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from fractions import Fraction
+from glob import glob
 from itertools import count, zip_longest
 from os import replace
 
@@ -133,9 +134,6 @@ def main():
         for epoch, block in epochs.items()
     }
 
-    with open(f"reports/01-snapshots-{chain.id}.json", "wt") as f:
-        json.dump(snapshots, f, indent=2)
-
     secho("Check addresses for being LP contracts", fg="yellow")
     print(valmap(len, snapshots))
     unique = set(concat(snapshots.values()))
@@ -156,43 +154,30 @@ def main():
         snapshots[epoch] = unwrap_balances(snapshots[epoch], replacements)
         print("after", len(snapshots[epoch]))
 
-    with open(f"reports/02-snapshots-{chain.id}.json", "wt") as f:
+    with open(f"snapshots/01-balances-{chain.id}.json", "wt") as f:
         json.dump(snapshots, f, indent=2)
 
 
-def stats():
-    data = json.load(open("reports/02-weights.json"))
-    data = {x: y / 1e12 for x, y in data.items() if y / 1e12 >= 2000}
-    print(tabulate(Counter(data).most_common(100)))
-    print(len(data))
+def combine():
+    combined_balances = defaultdict(Counter)
 
+    # balances from all networks are combined
+    sources = [json.load(open(f)) for f in glob("snapshots/01-*.json")]
+    for source in sources:
+        for epoch in source:
+            for user, balance in source[epoch].items():
+                combined_balances[epoch][user] += balance
 
-def check():
-    blocks = list(generate_snapshot_blocks())
-    print(len(blocks))
-    print(blocks)
-
-
-def get_block_time():
-    block_diff = chain.height - DEPLOY_BLOCK
-    time_diff = chain[-1].timestamp - chain[DEPLOY_BLOCK].timestamp
-    print(time_diff / block_diff)
-
-
-def distribution():
-    from glob import glob
-
+    # each epoch where you had at least min balance adds a single chance
     chances = Counter()
-    for f in glob("reports/01-snapshots-*.json"):
-        data = json.load(open(f))
-        for block in data:
-            for user in data[block]:
-                chances[user] += 1
+    for epoch in combined_balances:
+        for user in combined_balances[epoch]:
+            assert combined_balances[epoch][user] >= MIN_BALANCE
+            chances[user] += 1
 
-    with open("reports/02-chances.json", "wt") as f:
+    with open(f"snapshots/02-chances.json", "wt") as f:
         json.dump(dict(chances.most_common()), f, indent=2)
 
-    from toolz import groupby, valmap
-
+    secho('chances distributions', fg='yellow')
     for a, b in sorted(valmap(len, groupby(chances.get, chances)).items()):
         print(f"{a} {b}")
