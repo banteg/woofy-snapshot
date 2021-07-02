@@ -1,25 +1,24 @@
 import json
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from fractions import Fraction
 from glob import glob
-from itertools import count, zip_longest
-from os import replace
+from itertools import count
 
-import toml
-from brownie import ZERO_ADDRESS, Contract, chain, interface, web3
-from brownie.network.event import _decode_logs
+from brownie import Contract, chain, interface, web3
 from camera_shy import uniswap_v3
-from camera_shy.common import (block_after_timestamp, decode_logs, get_code,
-                               get_logs, get_token_transfers,
-                               transfers_to_balances, unwrap_balances)
+from camera_shy.common import (
+    block_after_timestamp,
+    decode_logs,
+    get_code,
+    get_token_transfers,
+    transfers_to_balances,
+    unwrap_balances,
+)
 from click import secho
-from joblib import Memory, Parallel, delayed
-from tabulate import tabulate
 from toolz import concat, groupby, valmap
-from tqdm import tqdm, trange
-from web3.middleware.filter import block_ranges
+from tqdm import tqdm
 
 SNAPSHOT_START = datetime(2021, 5, 12, tzinfo=timezone.utc)
 SNAPSHOT_INTERVAL = timedelta(days=7)
@@ -178,6 +177,9 @@ def combine():
     with open(f"snapshots/02-chances.json", "wt") as f:
         json.dump(dict(chances.most_common()), f, indent=2)
 
-    secho('chances distributions', fg='yellow')
+    secho("chances distributions", fg="yellow")
     for a, b in sorted(valmap(len, groupby(chances.get, chances)).items()):
         print(f"{a} {b}")
+
+    secho("unique users", fg="yellow")
+    print(len(chances))
