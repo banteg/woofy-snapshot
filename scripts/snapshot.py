@@ -6,7 +6,7 @@ from fractions import Fraction
 from glob import glob
 from itertools import count
 
-from brownie import Contract, chain, interface, web3
+from brownie import Contract, chain, interface, web3, ZERO_ADDRESS
 from camera_shy import uniswap_v3
 from camera_shy.common import (
     block_after_timestamp,
@@ -27,27 +27,32 @@ CHAINS = {
     1: {
         "network": "eth",
         "woofy": "0xD0660cD418a64a1d44E9214ad8e459324D8157f1",
+        "yvWoofy": ZERO_ADDRESS,
         "deploy_block": 12414993,
     },
     250: {
         "network": "ftm",
         "woofy": "0xD0660cD418a64a1d44E9214ad8e459324D8157f1",
+        "yvWoofy": "0x6fCE944d1f2f877B3972e0E8ba81d27614D62BeD",
         "deploy_block": 6146773,
     },
     56: {
         "network": "bsc",
         "woofy": "0xD0660cD418a64a1d44E9214ad8e459324D8157f1",
+        "yvWoofy": ZERO_ADDRESS,
         "deploy_block": 7363975,
     },
     137: {
         "network": "matic",
         "woofy": "0xD0660cD418a64a1d44E9214ad8e459324D8157f1",
+        "yvWoofy": "0xEAFB3Ee25B5a9a1b35F193A4662E3bDba7A95BEb",
         "deploy_block": 14604154,
     },
 }
 UNISWAP_V3_FACTORY = "0x1F98431c8aD98523631AE4a59f267346ea31F984"
 CHAIN = CHAINS[chain.id]
 WOOFY = CHAIN["woofy"]
+YV_WOOFY = CHAIN["yvWoofy"]
 DEPLOY_BLOCK = CHAIN["deploy_block"]
 
 
@@ -124,6 +129,7 @@ def unwrap_lp_tokens(snapshot, block, min_balance=0):
 
 def main():
     epochs = generate_snapshot_blocks(SNAPSHOT_START, SNAPSHOT_INTERVAL)
+
     secho("Fetch Transfer logs", fg="yellow")
     logs = get_token_transfers(WOOFY, DEPLOY_BLOCK)
     events = decode_logs(list(logs))
@@ -133,6 +139,16 @@ def main():
         epoch: transfers_to_balances(events, block, MIN_BALANCE)
         for epoch, block in epochs.items()
     }
+
+    if YV_WOOFY is not ZERO_ADDRESS:
+        secho("Check addresses for yvWoofy holders", fg="yellow")
+        logs = get_token_transfers(YV_WOOFY, DEPLOY_BLOCK)
+        events = decode_logs(list(logs))
+        secho("Photograph balances at each snapshot block", fg="yellow")
+        snapshots = {
+            epoch: transfers_to_balances(events, block, MIN_BALANCE)
+            for epoch, block in epochs.items()
+        }
 
     secho("Check addresses for being LP contracts", fg="yellow")
     print(valmap(len, snapshots))
