@@ -1,7 +1,7 @@
 from collections import Counter
 from datetime import datetime
 
-from brownie import chain, web3, Contract
+from brownie import Contract, chain, web3
 from brownie.network.event import _decode_logs
 from joblib import Memory
 from toolz import concat
@@ -37,7 +37,8 @@ def get_token_transfers(token, start_block):
     yield from concat(
         get_logs(token, [contract.topics["Transfer"]], start, end)
         for start, end in tqdm(
-            list(block_ranges(start_block, chain.height, log_batch_size)), desc="fetch logs"
+            list(block_ranges(start_block, chain.height, log_batch_size)),
+            desc="fetch logs",
         )
     )
 
@@ -100,3 +101,10 @@ def unwrap_balances(balances, replacements):
             balances.setdefault(user, 0)
             balances[user] += balance
     return dict(Counter(balances).most_common())
+
+
+def merge_balances(*many_balances):
+    merged = Counter()
+    for balances in many_balances:
+        merged += balances
+    return dict(merged.most_common())
