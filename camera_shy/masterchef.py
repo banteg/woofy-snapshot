@@ -1,0 +1,51 @@
+from brownie import Contract, chain
+from tqdm import trange, tqdm
+from camera_shy.common import get_logs, decode_logs, memory, eth_call
+from web3.middleware.filter import block_ranges
+from eth_abi import encode_single
+from eth_utils import encode_hex
+from toolz import concat
+from concurrent.futures import ThreadPoolExecutor
+
+SPOOKY_CHEF = "0x2b2929E785374c651a81A63878Ab22742656DcDd"
+
+
+def is_masterchef(address):
+    try:
+        return eth_call(address, "poolLength()(uint256)")
+    except ValueError:
+        return False
+
+
+def find_pids_with_token(chef, token):
+    chef = Contract(chef)
+    pids = []
+    for pid in trange(chef.poolLength(), desc="scanning masterchef"):
+        info = chef.poolInfo(pid).dict()
+        # assume only uniswap v2 style lp tokens
+        lp_tokens = [
+            eth_call(info["lpToken"], "token0()(address)"),
+            eth_call(info["lpToken"], "token1()(address)"),
+        ]
+        if token in lp_tokens:
+            pids.append(pid)
+
+    return pids
+
+
+def get_masterchef_deposits(chef, pids, start_block):
+    chef = Contract(chef)
+    topics = [
+        [chef.topics[key] for key in ["Deposit", "Withdraw", "EmergencyWithdraw"]],
+        None,
+        [encode_hex(encode_single("uint256", pid)) for pid in pids],
+    ]
+    ranges = list(block_ranges(start_block, chain.height, 10000))
+    func = lambda x: get_logs(str(chef), topics, x[0], x[1])
+    tasks = ThreadPoolExecutor().map(func, ranges)
+    logs = list(concat(tqdm(tasks, desc="fetch masterchef logs", total=len(ranges))))
+    return decode_logs(logs)
+
+
+def unwrap_masterchef_stakers(snapshot, block):
+    ...
