@@ -167,7 +167,7 @@ def main():
             for epoch in snapshots
         }
 
-    secho("Check addresses for being LP contracts", fg="yellow")
+    secho("Check addresses for being LP contracts", fg="yellow", bold=True)
 
     for epoch, block in epochs.items():
         replacements = {}
@@ -184,9 +184,18 @@ def main():
     contracts = filter_contracts(unique_addresses)
     print(len(contracts), "contracts")
 
-    for contract in contracts:
-        is_chef = masterchef.is_masterchef(contract)
-        secho(f"{contract} {is_chef}", fg="green" if is_chef else "red")
+    secho("Check addresses for being MasterChef contracts", fg="yellow", bold=True)
+    chefs = [contract for contract in contracts if masterchef.is_masterchef(contract)]
+    pids = {
+        chef: masterchef.find_pids_with_token(chef, WOOFY)
+        for chef in tqdm(chefs, desc='finding chef pids')
+    }
+    print(pids)
+    print(build_tree([
+        [style("MasterChef contracts", fg="bright_yellow"),
+        *[[chef, *map(str, pids[chef])] for chef in pids]
+        ]
+    ]))
 
     with open(f"snapshots/01-balances-{chain.id}.json", "wt") as f:
         json.dump(snapshots, f, indent=2)
@@ -218,3 +227,15 @@ def combine():
 
     secho("unique users", fg="yellow")
     print(len(chances))
+
+
+def spook():
+    from time import perf_counter
+    start = perf_counter()
+    secho("MasterChef contracts", fg="bright_yellow")
+    
+    snapsots = {'0x9083EA3756BDE6Ee6f27a6e996806FBD37F6F093': [23], '0x2b2929E785374c651a81A63878Ab22742656DcDd': [20]}
+    for chef in snapsots:
+        print(masterchef.find_pids_with_token(chef, WOOFY))
+    
+    secho(f'{perf_counter() - start:.3f}s', fg='green', bold=True)

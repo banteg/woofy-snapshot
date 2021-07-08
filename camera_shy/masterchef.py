@@ -6,10 +6,12 @@ from eth_abi import encode_single
 from eth_utils import encode_hex
 from toolz import concat
 from concurrent.futures import ThreadPoolExecutor
+from brownie.convert.datatypes import EthAddress
 
 SPOOKY_CHEF = "0x2b2929E785374c651a81A63878Ab22742656DcDd"
 
 
+@memory.cache()
 def is_masterchef(address):
     try:
         return eth_call(address, "poolLength()(uint256)")
@@ -17,20 +19,28 @@ def is_masterchef(address):
         return False
 
 
+@memory.cache()
+def contains_tokens(lp, token):
+    try:
+        # assume uniswap v2 style lp tokens
+        lp_tokens = [
+            EthAddress(eth_call(lp, f"{key}()(address)"))
+            for key in ["token0", "token1"]
+        ]
+    except ValueError:
+        lp_tokens = [lp]
+
+    return token in lp_tokens
+
+
+@memory.cache()
 def find_pids_with_token(chef, token):
     chef = Contract(chef)
-    pids = []
-    for pid in trange(chef.poolLength(), desc="scanning masterchef"):
-        info = chef.poolInfo(pid).dict()
-        # assume only uniswap v2 style lp tokens
-        lp_tokens = [
-            eth_call(info["lpToken"], "token0()(address)"),
-            eth_call(info["lpToken"], "token1()(address)"),
-        ]
-        if token in lp_tokens:
-            pids.append(pid)
-
-    return pids
+    data = ThreadPoolExecutor().map(chef.poolInfo, range(chef.poolLength()))
+    contains = ThreadPoolExecutor().map(
+        lambda info: contains_tokens(info["lpToken"], token), data
+    )
+    return [pid for pid, has in enumerate(contains) if has]
 
 
 def get_masterchef_deposits(chef, pids, start_block):
