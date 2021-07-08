@@ -1,7 +1,10 @@
 import math
 from collections import Counter
 from fractions import Fraction
+
 from brownie import Contract
+from brownie.convert import EthAddress
+from eth_abi.exceptions import InsufficientDataBytes
 from scripts.snapshot import UNISWAP_V3_FACTORY
 
 from camera_shy.common import (
@@ -19,8 +22,8 @@ def is_uniswap_v3_pool(address):
     if not get_code(address):
         return False
     try:
-        return eth_call(address, "factory()(address)") == UNISWAP_V3_FACTORY
-    except ValueError:
+        return EthAddress(eth_call(address, "factory()(address)")) == UNISWAP_V3_FACTORY
+    except (ValueError, InsufficientDataBytes):
         return False
 
 

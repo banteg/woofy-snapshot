@@ -1,13 +1,16 @@
-from brownie import Contract, chain, interface
-from tqdm import trange, tqdm
-from camera_shy.common import get_logs, decode_logs, memory, eth_call, filter_contracts
-from web3.middleware.filter import block_ranges
+from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
+
+from brownie import Contract, chain
+from brownie.convert.datatypes import EthAddress
 from eth_abi import encode_single
+from eth_abi.exceptions import InsufficientDataBytes
 from eth_utils import encode_hex
 from toolz import concat
-from concurrent.futures import ThreadPoolExecutor
-from brownie.convert.datatypes import EthAddress
-from collections import defaultdict, Counter
+from tqdm import tqdm
+from web3.middleware.filter import block_ranges
+
+from camera_shy.common import decode_logs, eth_call, get_logs, memory
 
 SPOOKY_CHEF = "0x2b2929E785374c651a81A63878Ab22742656DcDd"
 
@@ -16,7 +19,7 @@ SPOOKY_CHEF = "0x2b2929E785374c651a81A63878Ab22742656DcDd"
 def is_masterchef(address):
     try:
         return eth_call(address, "poolLength()(uint256)")
-    except ValueError:
+    except (ValueError, InsufficientDataBytes):
         return False
 
 
@@ -28,7 +31,7 @@ def contains_tokens(lp, token):
             EthAddress(eth_call(lp, f"{key}()(address)"))
             for key in ["token0", "token1"]
         ]
-    except ValueError:
+    except (ValueError, InsufficientDataBytes):
         lp_tokens = [lp]
 
     return token in lp_tokens

@@ -76,14 +76,21 @@ def generate_snapshot_blocks(start, interval):
 
 
 def unwrap_uniswap_v3(snapshot, block):
-    secho("Fetch Uniswap v3 Positions", fg="yellow")
     uniswap_v3_positions = uniswap_v3.fetch_uniswap_v3_positions(block)
 
-    secho(f"Looking for Uniswap v3 Pools", fg="yellow")
     uniswap_pools = [
         user for user in tqdm(snapshot) if uniswap_v3.is_uniswap_v3_pool(user)
     ]
-    secho(f"Found {len(uniswap_pools)} Uniswap v3 Pools", fg="yellow")
+    print(
+        build_tree(
+            [
+                [
+                    style(f"Uniswap V3 Pools", fg="bright_magenta"),
+                    *uniswap_pools,
+                ]
+            ]
+        )
+    )
 
     replacements = {}
     for pool in uniswap_pools:
@@ -114,7 +121,7 @@ def unwrap_lp_tokens(snapshot, block, min_balance=0):
             pools.append(pool)
 
     if pools:
-        print(build_tree([[style("Uniswap-like pools", fg="bright_magenta"), *pools]]))
+        print(build_tree([[style("Uniswap V2 Pools", fg="bright_magenta"), *pools]]))
 
     for pool in pools:
         logs = get_token_transfers(pool, DEPLOY_BLOCK)
