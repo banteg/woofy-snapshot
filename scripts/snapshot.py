@@ -5,14 +5,23 @@ from datetime import datetime, timedelta, timezone
 from fractions import Fraction
 from glob import glob
 from itertools import count
+from brownie.utils.output import build_tree
 
 from brownie import ZERO_ADDRESS, Contract, chain, interface, web3
-from camera_shy import uniswap_v3
-from camera_shy.common import (block_after_timestamp, decode_logs, get_code,
-                               get_token_transfers, merge_balances,
-                               transfers_to_balances, unwrap_balances)
-from click import secho
-from toolz import concat, groupby, valmap
+from camera_shy import uniswap_v3, masterchef
+from camera_shy.common import (
+    block_after_timestamp,
+    decode_logs,
+    get_code,
+    get_token_transfers,
+    merge_balances,
+    transfers_to_balances,
+    unwrap_balances,
+    filter_contracts,
+    eth_call,
+)
+from click import secho, style
+from toolz import concat, groupby, valmap, unique
 from tqdm import tqdm
 
 SNAPSHOT_START = datetime(2021, 5, 12, tzinfo=timezone.utc)
@@ -89,17 +98,29 @@ def unwrap_uniswap_v3(snapshot, block):
 
 
 def unwrap_lp_tokens(snapshot, block, min_balance=0):
-    codes = list(ThreadPoolExecutor().map(get_code, snapshot))
-    contracts = [addr for addr, code in zip(snapshot, codes) if code]
+    contracts = filter_contracts(snapshot)
     replacements = {}
+    pools = []
 
     for pool in tqdm(contracts, desc="identify pools"):
         try:
-            factory = interface.IUniswapV2Pair(pool).factory()
+            reserves = eth_call(pool, "getReserves()(uint112,uint112,uint32)")
+            factory = eth_call(pool, "factory()(address)")
         except ValueError:
             continue
+        else:
+            # cache the abi to skip pulling from explorer
+            contract = interface.IUniswapV2Pair(pool)
+            pools.append(pool)
 
-        secho(f"Unwrapping LP {pool} => {factory}", fg="yellow")
+    if pools:
+        print(
+            build_tree([[style("Uniswap V2 like pools", fg="bright_magenta"), *pools]])
+        )
+    else:
+        secho("No Uniswap V2 like pools found", fg="bright_magenta")
+
+    for pool in pools:
         logs = get_token_transfers(pool, DEPLOY_BLOCK)
         events = decode_logs(list(logs))
         balances = transfers_to_balances(events, block)
@@ -147,23 +168,25 @@ def main():
         }
 
     secho("Check addresses for being LP contracts", fg="yellow")
-    print(valmap(len, snapshots))
-    unique = set(concat(snapshots.values()))
-    print(len(unique), "uniques")
 
     for epoch, block in epochs.items():
-        secho(f"{epoch} Unwrap LP contracts", fg="yellow")
-
-        print("before", len(snapshots[epoch]))
         replacements = {}
-
         replacements.update(unwrap_lp_tokens(snapshots[epoch], block, MIN_BALANCE))
 
         if chain.id == 1:
             replacements.update(unwrap_uniswap_v3(snapshots[epoch], block))
 
         snapshots[epoch] = unwrap_balances(snapshots[epoch], replacements)
-        print("after", len(snapshots[epoch]))
+        print(epoch, "after", len(snapshots[epoch]))
+
+    unique_addresses = list(unique(concat(snapshots.values())))
+    print(len(unique_addresses), "unique")
+    contracts = filter_contracts(unique_addresses)
+    print(len(contracts), "contracts")
+
+    for contract in contracts:
+        is_chef = masterchef.is_masterchef(contract)
+        secho(f"{contract} {is_chef}", fg="green" if is_chef else "red")
 
     with open(f"snapshots/01-balances-{chain.id}.json", "wt") as f:
         json.dump(snapshots, f, indent=2)
