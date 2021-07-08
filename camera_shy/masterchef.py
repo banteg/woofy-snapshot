@@ -37,10 +37,19 @@ def contains_tokens(lp, token):
 @memory.cache()
 def find_pids_with_token(chef, token):
     chef = Contract(chef)
-    data = ThreadPoolExecutor().map(chef.poolInfo, range(chef.poolLength()))
-    contains = ThreadPoolExecutor().map(
-        lambda info: contains_tokens(info["lpToken"], token), data
-    )
+    print(f'checking {chef}')
+    if "lpToken" in chef.poolInfo(0).dict():
+        data = [
+            info["lpToken"]
+            for info in ThreadPoolExecutor().map(
+                chef.poolInfo, range(chef.poolLength())
+            )
+        ]
+    else:
+        # MiniChefV2 doesn't return lpToken
+        data = ThreadPoolExecutor().map(chef.lpToken, range(chef.poolLength()))
+
+    contains = ThreadPoolExecutor().map(lambda lp: contains_tokens(lp, token), data)
     return [pid for pid, has in enumerate(contains) if has]
 
 
@@ -65,9 +74,9 @@ def chef_events_to_staked_balances(events, snapshot_block):
     for event in events:
         if event.block_number > snapshot_block:
             break
-        if event.name == 'Deposit':
-            balances[event['pid']][event['user']] += event['amount']
-        elif event.name in ['Withdraw', 'EmergencyWithdraw']:
-            balances[event['pid']][event['user']] -= event['amount']
+        if event.name == "Deposit":
+            balances[event["pid"]][event["user"]] += event["amount"]
+        elif event.name in ["Withdraw", "EmergencyWithdraw"]:
+            balances[event["pid"]][event["user"]] -= event["amount"]
 
     return dict(Counter(balances).most_common())

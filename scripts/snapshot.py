@@ -141,10 +141,9 @@ def unwrap_lp_tokens(snapshot, block, min_balance=0):
 
 
 def unwrap_masterchef(snapshot):
-    secho("MasterChef contracts", fg="bright_yellow")
     contracts = filter_contracts(snapshot)
     chefs = [contract for contract in contracts if masterchef.is_masterchef(contract)]
-    print(f'{len(snapshot)} users -> {len(contracts)} contracts -> {len(chefs)} chefs')
+    print(f"{len(snapshot)} users -> {len(contracts)} contracts -> {len(chefs)} chefs")
     replacements = {}
     pids = {
         chef: masterchef.find_pids_with_token(chef, WOOFY)
@@ -183,6 +182,7 @@ def unwrap_masterchef(snapshot):
         }
 
     import pprint
+
     pprint.pprint(replacements)
 
     return replacements
@@ -218,7 +218,7 @@ def main():
     secho("Check addresses for being LP contracts", fg="yellow", bold=True)
 
     for epoch, block in epochs.items():
-        secho(f'Amending {epoch}', fg='green', bold=True)
+        secho(f"Amending {epoch}", fg="green", bold=True)
         replacements = {}
         replacements.update(unwrap_lp_tokens(snapshots[epoch], block, MIN_BALANCE))
 
