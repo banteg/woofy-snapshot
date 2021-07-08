@@ -1,12 +1,13 @@
-from brownie import Contract, chain
+from brownie import Contract, chain, interface
 from tqdm import trange, tqdm
-from camera_shy.common import get_logs, decode_logs, memory, eth_call
+from camera_shy.common import get_logs, decode_logs, memory, eth_call, filter_contracts
 from web3.middleware.filter import block_ranges
 from eth_abi import encode_single
 from eth_utils import encode_hex
 from toolz import concat
 from concurrent.futures import ThreadPoolExecutor
 from brownie.convert.datatypes import EthAddress
+from collections import defaultdict, Counter
 
 SPOOKY_CHEF = "0x2b2929E785374c651a81A63878Ab22742656DcDd"
 
@@ -57,5 +58,16 @@ def get_masterchef_deposits(chef, pids, start_block):
     return decode_logs(logs)
 
 
-def unwrap_masterchef_stakers(snapshot, block):
-    ...
+def chef_events_to_staked_balances(events, snapshot_block):
+    # pid -> user -> balance
+    balances = defaultdict(Counter)
+
+    for event in events:
+        if event.block_number > snapshot_block:
+            break
+        if event.name == 'Deposit':
+            balances[event['pid']][event['user']] += event['amount']
+        elif event.name in ['Withdraw', 'EmergencyWithdraw']:
+            balances[event['pid']][event['user']] -= event['amount']
+
+    return dict(Counter(balances).most_common())

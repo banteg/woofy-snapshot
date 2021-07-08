@@ -140,6 +140,54 @@ def unwrap_lp_tokens(snapshot, block, min_balance=0):
     return replacements
 
 
+def unwrap_masterchef(snapshot):
+    secho("MasterChef contracts", fg="bright_yellow")
+    contracts = filter_contracts(snapshot)
+    chefs = [contract for contract in contracts if masterchef.is_masterchef(contract)]
+    print(f'{len(snapshot)} users -> {len(contracts)} contracts -> {len(chefs)} chefs')
+    replacements = {}
+    pids = {
+        chef: masterchef.find_pids_with_token(chef, WOOFY)
+        for chef in tqdm(chefs, desc="finding chef pids")
+    }
+    if any(len(pids[chef]) > 1 for chef in pids):
+        raise NotImplementedError("multiple pids per chef are unsupported yet")
+
+    print(pids)
+    print(
+        build_tree(
+            [
+                [
+                    style("MasterChef contracts", fg="bright_yellow"),
+                    *[[chef, *map(str, pids[chef])] for chef in pids],
+                ]
+            ]
+        )
+    )
+
+    for chef in pids:
+        deposits = masterchef.get_masterchef_deposits(chef, pids[chef], DEPLOY_BLOCK)
+        print(len(deposits))
+        balances = masterchef.chef_events_to_staked_balances(deposits, chain.height)
+        print("->", valmap(len, balances))
+        total_balances = merge_balances(*balances.values())
+        supply = sum(total_balances.values())
+        replacements[chef] = {
+            user: int(Fraction(balance, supply) * snapshot[chef])
+            for user, balance in total_balances.items()
+        }
+        replacements[chef] = {
+            user: balance
+            for user, balance in replacements[chef].items()
+            if balance >= MIN_BALANCE
+        }
+
+    import pprint
+    pprint.pprint(replacements)
+
+    return replacements
+
+
 def main():
     epochs = generate_snapshot_blocks(SNAPSHOT_START, SNAPSHOT_INTERVAL)
 
@@ -170,32 +218,20 @@ def main():
     secho("Check addresses for being LP contracts", fg="yellow", bold=True)
 
     for epoch, block in epochs.items():
+        secho(f'Amending {epoch}', fg='green', bold=True)
         replacements = {}
         replacements.update(unwrap_lp_tokens(snapshots[epoch], block, MIN_BALANCE))
 
         if chain.id == 1:
             replacements.update(unwrap_uniswap_v3(snapshots[epoch], block))
 
+        # apply lp balances before seaching for masterchefs
         snapshots[epoch] = unwrap_balances(snapshots[epoch], replacements)
+
+        replacements = unwrap_masterchef(snapshots[epoch])
+        snapshots[epoch] = unwrap_balances(snapshots[epoch], replacements)
+
         print(epoch, "after", len(snapshots[epoch]))
-
-    unique_addresses = list(unique(concat(snapshots.values())))
-    print(len(unique_addresses), "unique")
-    contracts = filter_contracts(unique_addresses)
-    print(len(contracts), "contracts")
-
-    secho("Check addresses for being MasterChef contracts", fg="yellow", bold=True)
-    chefs = [contract for contract in contracts if masterchef.is_masterchef(contract)]
-    pids = {
-        chef: masterchef.find_pids_with_token(chef, WOOFY)
-        for chef in tqdm(chefs, desc='finding chef pids')
-    }
-    print(pids)
-    print(build_tree([
-        [style("MasterChef contracts", fg="bright_yellow"),
-        *[[chef, *map(str, pids[chef])] for chef in pids]
-        ]
-    ]))
 
     with open(f"snapshots/01-balances-{chain.id}.json", "wt") as f:
         json.dump(snapshots, f, indent=2)
@@ -227,15 +263,3 @@ def combine():
 
     secho("unique users", fg="yellow")
     print(len(chances))
-
-
-def spook():
-    from time import perf_counter
-    start = perf_counter()
-    secho("MasterChef contracts", fg="bright_yellow")
-    
-    snapsots = {'0x9083EA3756BDE6Ee6f27a6e996806FBD37F6F093': [23], '0x2b2929E785374c651a81A63878Ab22742656DcDd': [20]}
-    for chef in snapsots:
-        print(masterchef.find_pids_with_token(chef, WOOFY))
-    
-    secho(f'{perf_counter() - start:.3f}s', fg='green', bold=True)
