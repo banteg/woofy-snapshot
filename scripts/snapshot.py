@@ -140,18 +140,17 @@ def unwrap_lp_tokens(snapshot, block, min_balance=0):
     return replacements
 
 
-def unwrap_masterchef(snapshot):
+def unwrap_masterchef(snapshot, lp_replacements):
+    print("lp repl", lp_replacements)
     contracts = filter_contracts(snapshot)
     chefs = [contract for contract in contracts if masterchef.is_masterchef(contract)]
     print(f"{len(snapshot)} users -> {len(contracts)} contracts -> {len(chefs)} chefs")
     replacements = {}
+    # chef -> pid -> lp
     pids = {
         chef: masterchef.find_pids_with_token(chef, WOOFY)
         for chef in tqdm(chefs, desc="finding chef pids")
     }
-    if any(len(pids[chef]) > 1 for chef in pids):
-        raise NotImplementedError("multiple pids per chef are unsupported yet")
-
     print(pids)
     print(
         build_tree(
@@ -166,18 +165,21 @@ def unwrap_masterchef(snapshot):
 
     for chef in pids:
         deposits = masterchef.get_masterchef_deposits(chef, pids[chef], DEPLOY_BLOCK)
-        print(len(deposits))
+        # pid -> user -> balance
         balances = masterchef.chef_events_to_staked_balances(deposits, chain.height)
-        print("->", valmap(len, balances))
-        total_balances = merge_balances(*balances.values())
-        supply = sum(total_balances.values())
-        replacements[chef] = {
-            user: int(Fraction(balance, supply) * snapshot[chef])
-            for user, balance in total_balances.items()
-        }
+        replacements[chef] = Counter()
+
+        for pid in pids[chef]:
+            lp_supply = sum(balances[pid].values())
+            token_supply = lp_replacements[pids[chef][pid]].get(chef, 0)
+            for user, balance in balances[pid].items():
+                replacements[chef][user] += int(
+                    Fraction(balance, lp_supply) * token_supply
+                )
+
         replacements[chef] = {
             user: balance
-            for user, balance in replacements[chef].items()
+            for user, balance in replacements[chef].most_common()
             if balance >= MIN_BALANCE
         }
 
@@ -215,21 +217,19 @@ def main():
             for epoch in snapshots
         }
 
-    secho("Check addresses for being LP contracts", fg="yellow", bold=True)
-
     for epoch, block in epochs.items():
-        secho(f"Amending {epoch}", fg="green", bold=True)
-        replacements = {}
-        replacements.update(unwrap_lp_tokens(snapshots[epoch], block, MIN_BALANCE))
+        secho(f"Photographing {epoch}", fg="green", bold=True)
+        lp_replacements = {}
+        lp_replacements.update(unwrap_lp_tokens(snapshots[epoch], block, MIN_BALANCE))
 
         if chain.id == 1:
-            replacements.update(unwrap_uniswap_v3(snapshots[epoch], block))
+            lp_replacements.update(unwrap_uniswap_v3(snapshots[epoch], block))
 
         # apply lp balances before seaching for masterchefs
-        snapshots[epoch] = unwrap_balances(snapshots[epoch], replacements)
+        snapshots[epoch] = unwrap_balances(snapshots[epoch], lp_replacements)
 
-        replacements = unwrap_masterchef(snapshots[epoch])
-        snapshots[epoch] = unwrap_balances(snapshots[epoch], replacements)
+        chef_replacements = unwrap_masterchef(snapshots[epoch], lp_replacements)
+        snapshots[epoch] = unwrap_balances(snapshots[epoch], chef_replacements)
 
         print(epoch, "after", len(snapshots[epoch]))
 

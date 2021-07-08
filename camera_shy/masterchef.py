@@ -47,10 +47,10 @@ def find_pids_with_token(chef, token):
         ]
     else:
         # MiniChefV2 doesn't return lpToken
-        data = ThreadPoolExecutor().map(chef.lpToken, range(chef.poolLength()))
+        data = list(ThreadPoolExecutor().map(chef.lpToken, range(chef.poolLength())))
 
     contains = ThreadPoolExecutor().map(lambda lp: contains_tokens(lp, token), data)
-    return [pid for pid, has in enumerate(contains) if has]
+    return {pid: lp for pid, (lp, has) in enumerate(zip(data, contains)) if has}
 
 
 def get_masterchef_deposits(chef, pids, start_block):
@@ -79,4 +79,4 @@ def chef_events_to_staked_balances(events, snapshot_block):
         elif event.name in ["Withdraw", "EmergencyWithdraw"]:
             balances[event["pid"]][event["user"]] -= event["amount"]
 
-    return dict(Counter(balances).most_common())
+    return balances
