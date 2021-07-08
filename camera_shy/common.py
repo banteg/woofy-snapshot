@@ -1,4 +1,5 @@
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from brownie import Contract, chain, web3
@@ -8,6 +9,8 @@ from toolz import concat
 from tqdm import tqdm
 from web3.middleware.filter import block_ranges
 
+from multicall import Call
+
 UNISWAP_V3_FACTORY = "0x1F98431c8aD98523631AE4a59f267346ea31F984"
 NFT_POSITION_MANAGER = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
 
@@ -15,9 +18,24 @@ memory = Memory(f"cache/{chain.id}", verbose=0)
 log_batch_size = {56: 1000}.get(chain.id, 10000)
 
 
+def eth_call(target, function, *args):
+    return Call(target, function, _w3=web3)(args)
+
+
 @memory.cache()
 def get_code(address):
     return web3.eth.get_code(address)
+
+
+def filter_contracts(addresses):
+    codes = ThreadPoolExecutor().map(get_code, addresses)
+    return [
+        addr
+        for addr, code in tqdm(
+            zip(addresses, codes), desc="finding contracts", total=len(addresses)
+        )
+        if code
+    ]
 
 
 @memory.cache()
