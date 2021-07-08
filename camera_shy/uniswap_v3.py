@@ -2,12 +2,19 @@ import math
 from collections import Counter
 from fractions import Fraction
 
-from brownie import Contract, chain, interface, web3
-from joblib import Memory
+from brownie import Contract
+from brownie.convert import EthAddress
+from eth_abi.exceptions import InsufficientDataBytes
 from scripts.snapshot import UNISWAP_V3_FACTORY
 
+from camera_shy.common import (
+    NFT_POSITION_MANAGER,
+    UNISWAP_V3_FACTORY,
+    eth_call,
+    get_code,
+    memory,
+)
 from camera_shy.multicall import fetch_multicall, fetch_multicall_batched
-from camera_shy.common import UNISWAP_V3_FACTORY, NFT_POSITION_MANAGER, memory, get_code
 
 
 @memory.cache()
@@ -15,8 +22,8 @@ def is_uniswap_v3_pool(address):
     if not get_code(address):
         return False
     try:
-        return interface.IUniswapV3Pool(address).factory() == UNISWAP_V3_FACTORY
-    except ValueError:
+        return EthAddress(eth_call(address, "factory()(address)")) == UNISWAP_V3_FACTORY
+    except (ValueError, InsufficientDataBytes):
         return False
 
 

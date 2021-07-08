@@ -7,12 +7,21 @@ from glob import glob
 from itertools import count
 
 from brownie import ZERO_ADDRESS, Contract, chain, interface, web3
-from camera_shy import uniswap_v3
-from camera_shy.common import (block_after_timestamp, decode_logs, get_code,
-                               get_token_transfers, merge_balances,
-                               transfers_to_balances, unwrap_balances)
-from click import secho
-from toolz import concat, groupby, valmap
+from brownie.utils.output import build_tree
+from camera_shy import masterchef, uniswap_v3
+from camera_shy.common import (
+    block_after_timestamp,
+    decode_logs,
+    eth_call,
+    filter_contracts,
+    get_token_transfers,
+    merge_balances,
+    transfers_to_balances,
+    unwrap_balances,
+)
+from click import secho, style
+from eth_abi.exceptions import InsufficientDataBytes
+from toolz import concat, groupby, unique, valmap
 from tqdm import tqdm
 
 SNAPSHOT_START = datetime(2021, 5, 12, tzinfo=timezone.utc)
@@ -67,14 +76,21 @@ def generate_snapshot_blocks(start, interval):
 
 
 def unwrap_uniswap_v3(snapshot, block):
-    secho("Fetch Uniswap v3 Positions", fg="yellow")
     uniswap_v3_positions = uniswap_v3.fetch_uniswap_v3_positions(block)
 
-    secho(f"Looking for Uniswap v3 Pools", fg="yellow")
     uniswap_pools = [
         user for user in tqdm(snapshot) if uniswap_v3.is_uniswap_v3_pool(user)
     ]
-    secho(f"Found {len(uniswap_pools)} Uniswap v3 Pools", fg="yellow")
+    print(
+        build_tree(
+            [
+                [
+                    style(f"Uniswap V3 Pools", fg="bright_magenta"),
+                    *uniswap_pools,
+                ]
+            ]
+        )
+    )
 
     replacements = {}
     for pool in uniswap_pools:
@@ -89,17 +105,25 @@ def unwrap_uniswap_v3(snapshot, block):
 
 
 def unwrap_lp_tokens(snapshot, block, min_balance=0):
-    codes = list(ThreadPoolExecutor().map(get_code, snapshot))
-    contracts = [addr for addr, code in zip(snapshot, codes) if code]
+    contracts = filter_contracts(snapshot)
     replacements = {}
+    pools = []
 
     for pool in tqdm(contracts, desc="identify pools"):
         try:
-            factory = interface.IUniswapV2Pair(pool).factory()
-        except ValueError:
+            reserves = eth_call(pool, "getReserves()(uint112,uint112,uint32)")
+            factory = eth_call(pool, "factory()(address)")
+        except (ValueError, InsufficientDataBytes):
             continue
+        else:
+            # cache the abi to skip pulling from explorer
+            contract = interface.IUniswapV2Pair(pool)
+            pools.append(pool)
 
-        secho(f"Unwrapping LP {pool} => {factory}", fg="yellow")
+    if pools:
+        print(build_tree([[style("Uniswap V2 Pools", fg="bright_magenta"), *pools]]))
+
+    for pool in pools:
         logs = get_token_transfers(pool, DEPLOY_BLOCK)
         events = decode_logs(list(logs))
         balances = transfers_to_balances(events, block)
@@ -119,51 +143,81 @@ def unwrap_lp_tokens(snapshot, block, min_balance=0):
     return replacements
 
 
+def unwrap_masterchef(snapshot, lp_replacements):
+    contracts = filter_contracts(snapshot)
+    chefs = [contract for contract in contracts if masterchef.is_masterchef(contract)]
+    print(f"{len(snapshot)} users -> {len(contracts)} contracts -> {len(chefs)} chefs")
+    replacements = {}
+    # chef -> pid -> lp
+    pids = {
+        chef: masterchef.find_pids_with_token(chef, WOOFY)
+        for chef in tqdm(chefs, desc="finding chef pids")
+    }
+    print(
+        build_tree(
+            [
+                [
+                    style("MasterChef contracts", fg="bright_yellow"),
+                    *[[chef, *map(str, pids[chef])] for chef in pids],
+                ]
+            ]
+        )
+    )
+
+    for chef in pids:
+        deposits = masterchef.get_masterchef_deposits(chef, pids[chef], DEPLOY_BLOCK)
+        # pid -> user -> balance
+        balances = masterchef.chef_events_to_staked_balances(deposits, chain.height)
+        replacements[chef] = Counter()
+
+        for pid in pids[chef]:
+            lp_supply = sum(balances[pid].values())
+            token_supply = lp_replacements[pids[chef][pid]].get(chef, 0)
+            for user, balance in balances[pid].items():
+                replacements[chef][user] += int(
+                    Fraction(balance, lp_supply) * token_supply
+                )
+
+        replacements[chef] = {
+            user: balance
+            for user, balance in replacements[chef].most_common()
+            if balance >= MIN_BALANCE
+        }
+
+    return replacements
+
+
 def main():
     epochs = generate_snapshot_blocks(SNAPSHOT_START, SNAPSHOT_INTERVAL)
+    snapshots = {}
 
-    secho("Fetch Transfer logs", fg="yellow")
     logs = get_token_transfers(WOOFY, DEPLOY_BLOCK)
     events = decode_logs(list(logs))
 
-    secho("Photograph balances at each snapshot block", fg="yellow")
-    snapshots = {
-        epoch: transfers_to_balances(events, block, MIN_BALANCE)
-        for epoch, block in epochs.items()
-    }
-
     if VAULT:
-        secho("Check addresses for yvWoofy holders", fg="yellow")
-        logs = get_token_transfers(VAULT, DEPLOY_BLOCK)
-        events = decode_logs(list(logs))
-        secho("Photograph balances at each snapshot block", fg="yellow")
-        vault_snapshots = {
-            epoch: transfers_to_balances(events, block, MIN_BALANCE)
-            for epoch, block in epochs.items()
-        }
-        snapshots = {
-            epoch: merge_balances(snapshots[epoch], vault_snapshots[epoch])
-            for epoch in snapshots
-        }
-
-    secho("Check addresses for being LP contracts", fg="yellow")
-    print(valmap(len, snapshots))
-    unique = set(concat(snapshots.values()))
-    print(len(unique), "uniques")
+        vault_logs = get_token_transfers(VAULT, DEPLOY_BLOCK)
+        vault_events = decode_logs(list(vault_logs))
 
     for epoch, block in epochs.items():
-        secho(f"{epoch} Unwrap LP contracts", fg="yellow")
+        secho(f"Photographing {epoch}", fg="green", bold=True)
 
-        print("before", len(snapshots[epoch]))
-        replacements = {}
+        snapshots[epoch] = transfers_to_balances(events, block, MIN_BALANCE)
 
-        replacements.update(unwrap_lp_tokens(snapshots[epoch], block, MIN_BALANCE))
+        if VAULT:
+            vault_additions = transfers_to_balances(vault_events, block, MIN_BALANCE)
+            snapshots[epoch] = merge_balances(snapshots[epoch], vault_additions)
+
+        lp_replacements = {}
+        lp_replacements.update(unwrap_lp_tokens(snapshots[epoch], block, MIN_BALANCE))
 
         if chain.id == 1:
-            replacements.update(unwrap_uniswap_v3(snapshots[epoch], block))
+            lp_replacements.update(unwrap_uniswap_v3(snapshots[epoch], block))
 
-        snapshots[epoch] = unwrap_balances(snapshots[epoch], replacements)
-        print("after", len(snapshots[epoch]))
+        # apply lp balances before seaching for masterchefs
+        snapshots[epoch] = unwrap_balances(snapshots[epoch], lp_replacements)
+
+        chef_replacements = unwrap_masterchef(snapshots[epoch], lp_replacements)
+        snapshots[epoch] = unwrap_balances(snapshots[epoch], chef_replacements)
 
     with open(f"snapshots/01-balances-{chain.id}.json", "wt") as f:
         json.dump(snapshots, f, indent=2)
