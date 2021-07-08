@@ -5,23 +5,23 @@ from datetime import datetime, timedelta, timezone
 from fractions import Fraction
 from glob import glob
 from itertools import count
-from brownie.utils.output import build_tree
 
 from brownie import ZERO_ADDRESS, Contract, chain, interface, web3
-from camera_shy import uniswap_v3, masterchef
+from brownie.utils.output import build_tree
+from camera_shy import masterchef, uniswap_v3
 from camera_shy.common import (
     block_after_timestamp,
     decode_logs,
-    get_code,
+    eth_call,
+    filter_contracts,
     get_token_transfers,
     merge_balances,
     transfers_to_balances,
     unwrap_balances,
-    filter_contracts,
-    eth_call,
 )
 from click import secho, style
-from toolz import concat, groupby, valmap, unique
+from eth_abi.exceptions import InsufficientDataBytes
+from toolz import concat, groupby, unique, valmap
 from tqdm import tqdm
 
 SNAPSHOT_START = datetime(2021, 5, 12, tzinfo=timezone.utc)
@@ -106,7 +106,7 @@ def unwrap_lp_tokens(snapshot, block, min_balance=0):
         try:
             reserves = eth_call(pool, "getReserves()(uint112,uint112,uint32)")
             factory = eth_call(pool, "factory()(address)")
-        except ValueError:
+        except (ValueError, InsufficientDataBytes):
             continue
         else:
             # cache the abi to skip pulling from explorer
@@ -114,11 +114,7 @@ def unwrap_lp_tokens(snapshot, block, min_balance=0):
             pools.append(pool)
 
     if pools:
-        print(
-            build_tree([[style("Uniswap V2 like pools", fg="bright_magenta"), *pools]])
-        )
-    else:
-        secho("No Uniswap V2 like pools found", fg="bright_magenta")
+        print(build_tree([[style("Uniswap-like pools", fg="bright_magenta"), *pools]]))
 
     for pool in pools:
         logs = get_token_transfers(pool, DEPLOY_BLOCK)
@@ -141,7 +137,6 @@ def unwrap_lp_tokens(snapshot, block, min_balance=0):
 
 
 def unwrap_masterchef(snapshot, lp_replacements):
-    print("lp repl", lp_replacements)
     contracts = filter_contracts(snapshot)
     chefs = [contract for contract in contracts if masterchef.is_masterchef(contract)]
     print(f"{len(snapshot)} users -> {len(contracts)} contracts -> {len(chefs)} chefs")
@@ -151,7 +146,6 @@ def unwrap_masterchef(snapshot, lp_replacements):
         chef: masterchef.find_pids_with_token(chef, WOOFY)
         for chef in tqdm(chefs, desc="finding chef pids")
     }
-    print(pids)
     print(
         build_tree(
             [
@@ -183,42 +177,29 @@ def unwrap_masterchef(snapshot, lp_replacements):
             if balance >= MIN_BALANCE
         }
 
-    import pprint
-
-    pprint.pprint(replacements)
-
     return replacements
 
 
 def main():
     epochs = generate_snapshot_blocks(SNAPSHOT_START, SNAPSHOT_INTERVAL)
+    snapshots = {}
 
-    secho("Fetch Transfer logs", fg="yellow")
     logs = get_token_transfers(WOOFY, DEPLOY_BLOCK)
     events = decode_logs(list(logs))
 
-    secho("Photograph balances at each snapshot block", fg="yellow")
-    snapshots = {
-        epoch: transfers_to_balances(events, block, MIN_BALANCE)
-        for epoch, block in epochs.items()
-    }
-
     if VAULT:
-        secho("Check addresses for yvWoofy holders", fg="yellow")
-        logs = get_token_transfers(VAULT, DEPLOY_BLOCK)
-        events = decode_logs(list(logs))
-        secho("Photograph balances at each snapshot block", fg="yellow")
-        vault_snapshots = {
-            epoch: transfers_to_balances(events, block, MIN_BALANCE)
-            for epoch, block in epochs.items()
-        }
-        snapshots = {
-            epoch: merge_balances(snapshots[epoch], vault_snapshots[epoch])
-            for epoch in snapshots
-        }
+        vault_logs = get_token_transfers(VAULT, DEPLOY_BLOCK)
+        vault_events = decode_logs(list(vault_logs))
 
     for epoch, block in epochs.items():
         secho(f"Photographing {epoch}", fg="green", bold=True)
+
+        snapshots[epoch] = transfers_to_balances(events, block, MIN_BALANCE)
+
+        if VAULT:
+            vault_additions = transfers_to_balances(vault_events, block, MIN_BALANCE)
+            snapshots[epoch] = merge_balances(snapshots[epoch], vault_additions)
+
         lp_replacements = {}
         lp_replacements.update(unwrap_lp_tokens(snapshots[epoch], block, MIN_BALANCE))
 
@@ -230,8 +211,6 @@ def main():
 
         chef_replacements = unwrap_masterchef(snapshots[epoch], lp_replacements)
         snapshots[epoch] = unwrap_balances(snapshots[epoch], chef_replacements)
-
-        print(epoch, "after", len(snapshots[epoch]))
 
     with open(f"snapshots/01-balances-{chain.id}.json", "wt") as f:
         json.dump(snapshots, f, indent=2)

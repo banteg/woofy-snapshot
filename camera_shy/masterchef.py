@@ -37,7 +37,6 @@ def contains_tokens(lp, token):
 @memory.cache()
 def find_pids_with_token(chef, token):
     chef = Contract(chef)
-    print(f'checking {chef}')
     if "lpToken" in chef.poolInfo(0).dict():
         data = [
             info["lpToken"]
