@@ -167,7 +167,7 @@ def unwrap_masterchef(snapshot, lp_replacements):
     for chef in pids:
         deposits = masterchef.get_masterchef_deposits(chef, pids[chef], DEPLOY_BLOCK)
         # pid -> user -> balance
-        balances = masterchef.chef_events_to_staked_balances(deposits, chain.height)
+        balances = masterchef.chef_events_to_staked_balances(deposits, block)
         replacements[chef] = Counter()
 
         for pid in pids[chef]:
@@ -216,7 +216,7 @@ def main():
         # apply lp balances before seaching for masterchefs
         snapshots[epoch] = unwrap_balances(snapshots[epoch], lp_replacements)
 
-        chef_replacements = unwrap_masterchef(snapshots[epoch], lp_replacements)
+        chef_replacements = unwrap_masterchef(snapshots[epoch], lp_replacements, block)
         snapshots[epoch] = unwrap_balances(snapshots[epoch], chef_replacements)
 
     with open(f"snapshots/01-balances-{chain.id}.json", "wt") as f:
