@@ -143,7 +143,7 @@ def unwrap_lp_tokens(snapshot, block, min_balance=0):
     return replacements
 
 
-def unwrap_masterchef(snapshot, lp_replacements):
+def unwrap_masterchef(snapshot, lp_replacements, block):
     contracts = filter_contracts(snapshot)
     chefs = [contract for contract in contracts if masterchef.is_masterchef(contract)]
     print(f"{len(snapshot)} users -> {len(contracts)} contracts -> {len(chefs)} chefs")
